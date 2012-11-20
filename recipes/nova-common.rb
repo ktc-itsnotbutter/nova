@@ -70,6 +70,15 @@ glance_serverlist = glance_servers.join(",")
 nova_api_endpoint = get_access_endpoint("nova-api-os-compute", "nova", "api")
 ec2_public_endpoint = get_access_endpoint("nova-api-ec2", "nova", "ec2-public")
 
+quantum_endpoint = get_access_endpoint("quantum-server", "quantum", "api")
+if quantum_endpoint != nil
+  use_quantum = true
+  quantum_url = quantum_endpoint["uri"]
+else
+  use_quantum = false
+  quantum_url = nil
+end
+
 if not node['package_component'].nil?
   release = node['package_component']
 else
@@ -98,8 +107,11 @@ template "/etc/nova/nova.conf" do
     "rabbit_ipaddress" => rabbit_info["host"],
     "rabbit_port" => rabbit_info["port"],
     "keystone_api_ipaddress" => ks_admin_endpoint["host"],
+    "keystone_admin_port" => ks_admin_endpoint["port"],
     "keystone_service_port" => ks_service_endpoint["port"],
     "glance_serverlist" => glance_serverlist,
+    "use_quantum" => use_quantum,
+    "quantum_url" => quantum_url,
     "iscsi_helper" => platform_options["iscsi_helper"],
     "fixed_range" => node["nova"]["networks"][0]["ipv4_cidr"],
     "public_interface" => node["nova"]["network"]["public_interface"],
@@ -152,9 +164,9 @@ template "/root/openrc" do
     "nova_api_version" => "1.1",
     "keystone_region" => node["nova"]["compute"]["region"],
     "auth_strategy" => "keystone",
-    "ec2_url" => ec2_public_endpoint["uri"],
-    "ec2_access_key" => node["credentials"]["EC2"]["admin"]["access"],
-    "ec2_secret_key" => node["credentials"]["EC2"]["admin"]["secret"]
+#    "ec2_url" => ec2_public_endpoint["uri"],
+#    "ec2_access_key" => node["credentials"]["EC2"]["admin"]["access"],
+#    "ec2_secret_key" => node["credentials"]["EC2"]["admin"]["secret"]
   )
 end
 
