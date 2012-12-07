@@ -36,7 +36,6 @@ keystone = get_settings_by_role("keystone", "keystone")
 keystone_admin_user = keystone["admin_user"]
 keystone_admin_password = keystone["users"][keystone_admin_user]["password"]
 keystone_admin_tenant = keystone["users"][keystone_admin_user]["default_tenant"]
-quantum = get_settings_by_role("quantum-server", "quantum")
 
 #creates db and user
 #function defined in osops-utils/libraries
@@ -51,7 +50,7 @@ execute "nova-manage db sync" do
 #  not_if "nova-manage db version && test $(nova-manage db version) -gt 0"
 end
   
-if quantum == nil
+if node["nova"]["quantum"]["use"] != true
   node["nova"]["networks"].each do |net|
       execute "nova-manage network create --label=#{net['label']}" do
           command "nova-manage network create --multi_host='T' --label=#{net['label']} --fixed_range_v4=#{net['ipv4_cidr']} --num_networks=#{net['num_networks']} --network_size=#{net['network_size']} --bridge=#{net['bridge']} --bridge_interface=#{net['bridge_dev']} --dns1=#{net['dns1']} --dns2=#{net['dns2']}"

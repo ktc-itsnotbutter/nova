@@ -56,6 +56,9 @@ default["nova"]["syslog"]["config_facility"] = "local1"                     # no
 # can this be wedged into the "api" endpoint?                               # node_attribute
 default["nova"]["compute"]["region"] = "RegionOne"                          # node_attribute
 
+# To use quantum or not to use
+default["nova"]["quantum"]["use"] = true                                    # node_attribute
+
 # TODO(shep): This should probably be ['nova']['network']['fixed']
 default["nova"]["networks"] = [                                             # cluster_attribute
         {

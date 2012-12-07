@@ -70,12 +70,12 @@ glance_serverlist = glance_servers.join(",")
 nova_api_endpoint = get_access_endpoint("nova-api-os-compute", "nova", "api")
 ec2_public_endpoint = get_access_endpoint("nova-api-ec2", "nova", "ec2-public")
 
-quantum_endpoint = get_access_endpoint("quantum-server", "quantum", "api")
-if quantum_endpoint != nil
-  use_quantum = true
-  quantum_url = quantum_endpoint["uri"]
+if node["nova"]["quantum"]["use"]
+  quantum_endpoint = get_access_endpoint("quantum-server", "quantum", "api")
+  if quantum_endpoint != nil
+    quantum_url = quantum_endpoint["uri"]
+  end
 else
-  use_quantum = false
   quantum_url = nil
 end
 
@@ -110,7 +110,7 @@ template "/etc/nova/nova.conf" do
     "keystone_admin_port" => ks_admin_endpoint["port"],
     "keystone_service_port" => ks_service_endpoint["port"],
     "glance_serverlist" => glance_serverlist,
-    "use_quantum" => use_quantum,
+    "use_quantum" => node["nova"]["quantum"]["use"],
     "quantum_url" => quantum_url,
     "iscsi_helper" => platform_options["iscsi_helper"],
     "fixed_range" => node["nova"]["networks"][0]["ipv4_cidr"],
