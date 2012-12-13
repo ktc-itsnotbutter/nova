@@ -1,3 +1,4 @@
+Chef::Log.info("apply_metadata_proxy_patch: #{node['quantum']['apply_metadata_proxy_patch']}")
 #
 # Cookbook Name:: nova
 # Recipe:: nova-common
@@ -28,11 +29,33 @@ end
 
 platform_options = node["nova"]["platform"][release]
 
+Chef::Log.info("common_packages: #{platform_options['common_packages']}")
 platform_options["common_packages"].each do |pkg|
   package pkg do
     action :upgrade
     options platform_options["package_overrides"]
   end
+end
+
+#
+# patch
+#
+python_dist_path = `python -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())"`.strip()
+
+Chef::Log.info("apply_metadata_proxy_patch: #{node['quantum']['apply_metadata_proxy_patch']}")
+cookbook_file '/tmp/metadata_proxy_nova_folsom.patch' do
+  action :nothing
+  subscribes :create_if_missing, "package[#{platform_options['python_nova_common_package']}]", :immediately
+  only_if { node['quantum']['apply_metadata_proxy_patch'] }
+  source "metadata_proxy_nova_folsom.patch"
+end
+
+execute "metadata proxy patch" do
+  action :nothing
+  subscribes :run, "package[#{platform_options['python_nova_common_package']}]", :immediately
+  only_if { node['quantum']['apply_metadata_proxy_patch'] }
+  command "patch -p1 < /tmp/metadata_proxy_nova_folsom.patch"
+  cwd python_dist_path
 end
 
 directory "/etc/nova" do
@@ -112,6 +135,7 @@ template "/etc/nova/nova.conf" do
     "glance_serverlist" => glance_serverlist,
     "use_quantum" => node["nova"]["quantum"]["use"],
     "quantum_url" => quantum_url,
+    "apply_metadata_proxy_patch" => node['quantum']['apply_metadata_proxy_patch'],
     "iscsi_helper" => platform_options["iscsi_helper"],
     "fixed_range" => node["nova"]["networks"][0]["ipv4_cidr"],
     "public_interface" => node["nova"]["network"]["public_interface"],

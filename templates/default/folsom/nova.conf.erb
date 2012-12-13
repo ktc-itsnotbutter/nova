@@ -153,6 +153,12 @@ volume_manager=cinder.volume.manager.VolumeManager
 volume_api_class=nova.volume.cinder.API
 enabled_apis=ec2,osapi_compute,metadata
 
+<% if @apply_metadata_proxy_patch %>
+service_quantum_metadata_proxy = true
+quantum_metadata_proxy_shared_secret = secret
+use_forwarded_for = true
+<% end %>
+
 ##### API #####
 ec2_workers=<%= node["cpu"]["total"].to_i %>
 osapi_compute_workers=<%= node["cpu"]["total"].to_i %>
