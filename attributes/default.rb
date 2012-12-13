@@ -56,6 +56,9 @@ default["nova"]["syslog"]["config_facility"] = "local1"                     # no
 # can this be wedged into the "api" endpoint?                               # node_attribute
 default["nova"]["compute"]["region"] = "RegionOne"                          # node_attribute
 
+# To use quantum or not to use
+default["nova"]["quantum"]["use"] = true                                    # node_attribute
+
 # TODO(shep): This should probably be ['nova']['network']['fixed']
 default["nova"]["networks"] = [                                             # cluster_attribute
         {
@@ -242,6 +245,7 @@ when "ubuntu"
     "nova_cert_packages" => ["nova-cert"],
     "nova_cert_service" => "nova-cert",
     "mysql_service" => "mysql",
+    "python_nova_common_package" => "python-nova",
     "common_packages" => ["nova-common", "python-nova", "python-novaclient"],
     "iscsi_helper" => "tgtadm",
     "iscsi_service" => "tgt",
@@ -266,7 +270,7 @@ when "ubuntu"
     "nova_api_metadata_process_name" => "nova-api-metadata",
     "nova_volume_packages" => ["nova-volume", "tgt"],
     "nova_volume_service" => "nova-volume",
-    "nova_compute_packages" => ["nova-compute"],
+    "nova_compute_packages" => ["python-mysqldb", "nova-compute"],
     "nova_compute_service" => "nova-compute",
     "nova_network_packages" => ["iptables", "nova-network"],
     "nova_network_service" => "nova-network",
@@ -283,6 +287,7 @@ when "ubuntu"
     "nova_cert_packages" => ["nova-cert"],
     "nova_cert_service" => "nova-cert",
     "mysql_service" => "mysql",
+    "python_nova_common_package" => "python-nova",
     "common_packages" => ["nova-common", "python-nova", "python-novaclient"],
     "iscsi_helper" => "tgtadm",
     "iscsi_service" => "tgt",
