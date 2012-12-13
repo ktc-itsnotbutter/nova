@@ -1,3 +1,4 @@
+Chef::Log.info("apply_metadata_proxy_patch: #{node['quantum']['apply_metadata_proxy_patch']}")
 #
 # Cookbook Name:: nova
 # Recipe:: api-metadata

@@ -1,0 +1,331 @@
+From 525bd175349e76e846268704d6602851d46a8058 Mon Sep 17 00:00:00 2001
+From: Choe, Cheng-Dae <choe.chengdae@kt.com>
+Date: Mon, 10 Dec 2012 20:31:55 +0900
+Subject: [PATCH 1/2] Merge "add metadata support for overlapping networks"
+ Conflicts:
+
+	nova/api/metadata/handler.py
+---
+ nova/api/metadata/base.py    |    9 ++-
+ nova/api/metadata/handler.py |  126 +++++++++++++++++++++++++++++++++++++-----
+ nova/tests/test_metadata.py  |   72 ++++++++++++++++++++++--
+ 3 files changed, 189 insertions(+), 18 deletions(-)
+
+diff --git a/nova/api/metadata/base.py b/nova/api/metadata/base.py
+index 6a472df..f29a977 100644
+--- a/nova/api/metadata/base.py
++++ b/nova/api/metadata/base.py
+@@ -384,7 +384,14 @@ def get_metadata_by_address(address):
+     ctxt = context.get_admin_context()
+     fixed_ip = network.API().get_fixed_ip_by_address(ctxt, address)
+ 
+-    instance = db.instance_get_by_uuid(ctxt, fixed_ip['instance_uuid'])
++    return get_metadata_by_instance_id(fixed_ip['instance_uuid'],
++                                       address,
++                                       ctxt)
++
++
++def get_metadata_by_instance_id(instance_id, address, ctxt=None):
++    ctxt = ctxt or context.get_admin_context()
++    instance = db.instance_get_by_uuid(ctxt, instance_id)
+     return InstanceMetadata(instance, address)
+ 
+ 
+diff --git a/nova/api/metadata/handler.py b/nova/api/metadata/handler.py
+index d022cbc..63af08d 100644
+--- a/nova/api/metadata/handler.py
++++ b/nova/api/metadata/handler.py
+@@ -17,6 +17,8 @@
+ #    under the License.
+ 
+ """Metadata request handler."""
++import hashlib
++import hmac
+ import os
+ 
+ import webob.dec
+@@ -28,6 +30,26 @@
+ from nova.openstack.common import log as logging
+ from nova import wsgi
+ 
++CACHE_EXPIRATION = 15  # in seconds
++
++CONF = cfg.CONF
++#CONF.import_opt('memcached_servers', 'nova.config')
++CONF.import_opt('use_forwarded_for', 'nova.api.auth')
++
++metadata_proxy_opts = [
++    cfg.BoolOpt(
++        'service_quantum_metadata_proxy',
++        default=False,
++        help='Set flag to indicate Quantum will proxy metadata requests and '
++             'resolve instance ids.'),
++     cfg.StrOpt(
++         'quantum_metadata_proxy_shared_secret',
++         default='',
++         help='Shared secret to validate proxies Quantum metadata requests')
++]
++
++CONF.register_opts(metadata_proxy_opts)
++
+ LOG = logging.getLogger(__name__)
+ FLAGS = flags.FLAGS
+ flags.DECLARE('use_forwarded_for', 'nova.api.auth')
+@@ -44,7 +66,7 @@ class MetadataRequestHandler(wsgi.Application):
+     def __init__(self):
+         self._cache = memcache.Client(FLAGS.memcached_servers, debug=0)
+ 
+-    def get_metadata(self, address):
++    def get_metadata_by_remote_address(self, address):
+         if not address:
+             raise exception.FixedIpNotFoundForAddress(address=address)
+ 
+@@ -58,35 +80,113 @@ def get_metadata(self, address):
+         except exception.NotFound:
+             return None
+ 
+-        self._cache.set(cache_key, data, 15)
++        self._cache.set(cache_key, data, CACHE_EXPIRATION)
++
++        return data
++
++    def get_metadata_by_instance_id(self, instance_id, address):
++        cache_key = 'metadata-%s' % instance_id
++        data = self._cache.get(cache_key)
++        if data:
++            return data
++
++        try:
++            data = base.get_metadata_by_instance_id(instance_id, address)
++        except exception.NotFound:
++            return None
++
++        self._cache.set(cache_key, data, CACHE_EXPIRATION)
+ 
+         return data
+ 
+     @webob.dec.wsgify(RequestClass=wsgi.Request)
+     def __call__(self, req):
++        if os.path.normpath("/" + req.path_info) == "/":
++            return(base.ec2_md_print(base.VERSIONS + ["latest"]))
++
++        if CONF.service_quantum_metadata_proxy:
++            meta_data = self._handle_instance_id_request(req)
++        else:
++            if req.headers.get('X-Instance-ID'):
++                LOG.warn(
++                    _("X-Instance-ID present in request headers. The "
++                      "'service_quantum_metadata_proxy' option must be enabled"
++                      " to process this header."))
++            meta_data = self._handle_remote_ip_request(req)
++
++        if meta_data is None:
++            raise webob.exc.HTTPNotFound()
++
++        try:
++            data = meta_data.lookup(req.path_info)
++        except base.InvalidMetadataPath:
++            raise webob.exc.HTTPNotFound()
++
++        return base.ec2_md_print(data)
++
++    def _handle_remote_ip_request(self, req):
+         remote_address = req.remote_addr
+         if FLAGS.use_forwarded_for:
+             remote_address = req.headers.get('X-Forwarded-For', remote_address)
+ 
+-        if os.path.normpath("/" + req.path_info) == "/":
+-            return(base.ec2_md_print(base.VERSIONS + ["latest"]))
+-
+         try:
+-            meta_data = self.get_metadata(remote_address)
++            meta_data = self.get_metadata_by_remote_address(remote_address)
+         except Exception:
+             LOG.exception(_('Failed to get metadata for ip: %s'),
+                           remote_address)
+             msg = _('An unknown error has occurred. '
+                     'Please try your request again.')
+-            exc = webob.exc.HTTPInternalServerError(explanation=unicode(msg))
+-            return exc
++            raise webob.exc.HTTPInternalServerError(explanation=unicode(msg))
++
+         if meta_data is None:
+             LOG.error(_('Failed to get metadata for ip: %s'), remote_address)
+-            raise webob.exc.HTTPNotFound()
++
++        return meta_data
++
++    def _handle_instance_id_request(self, req):
++        instance_id = req.headers.get('X-Instance-ID')
++        signature = req.headers.get('X-Instance-ID-Signature')
++        remote_address = req.remote_addr
++
++        # Ensure that only one header was passed
++
++        if instance_id is None:
++            msg = _('X-Instance-ID header is missing from request.')
++        elif not isinstance(instance_id, basestring):
++            msg = _('Multiple X-Instance-ID headers found within request.')
++        else:
++            msg = None
++
++        if msg:
++            raise webob.exc.HTTPBadRequest(explanation=msg)
++
++        expected_signature = hmac.new(
++            CONF.quantum_metadata_proxy_shared_secret,
++            instance_id,
++            hashlib.sha256).hexdigest()
++
++        if expected_signature != signature:
++            if instance_id:
++                w = _('X-Instance-ID-Signature: %(signature)s does not match '
++                      'the expected value: %(expected_signature)s for id: '
++                      '%(instance_id)s.  Request From: %(remote_address)s')
++                LOG.warn(w % locals())
++
++            msg = _('Invalid proxy request signature.')
++            raise webob.exc.HTTPForbidden(explanation=msg)
+ 
+         try:
+-            data = meta_data.lookup(req.path_info)
+-        except base.InvalidMetadataPath:
+-            raise webob.exc.HTTPNotFound()
++            meta_data = self.get_metadata_by_instance_id(instance_id,
++                                                         remote_address)
++        except Exception:
++            LOG.exception(_('Failed to get metadata for instance id: %s'),
++                          instance_id)
++            msg = _('An unknown error has occurred. '
++                    'Please try your request again.')
++            raise webob.exc.HTTPInternalServerError(explanation=unicode(msg))
+ 
+-        return base.ec2_md_print(data)
++        if meta_data is None:
++            LOG.error(_('Failed to get metadata for instance id: %s'),
++                      instance_id)
++
++        return meta_data
+diff --git a/nova/tests/test_metadata.py b/nova/tests/test_metadata.py
+index a8c78d4..9225599 100644
+--- a/nova/tests/test_metadata.py
++++ b/nova/tests/test_metadata.py
+@@ -83,18 +83,23 @@ def sg_get(*args, **kwargs):
+ 
+ 
+ def fake_request(stubs, mdinst, relpath, address="127.0.0.1",
+-                 fake_get_metadata=None, headers=None):
++                 fake_get_metadata=None, headers=None,
++                 fake_get_metadata_by_instance_id=None):
+ 
+-    def get_metadata(address):
++    def get_metadata_by_remote_address(address):
+         return mdinst
+ 
+     app = handler.MetadataRequestHandler()
+ 
+     if fake_get_metadata is None:
+-        fake_get_metadata = get_metadata
++        fake_get_metadata = get_metadata_by_remote_address
+ 
+     if stubs:
+-        stubs.Set(app, 'get_metadata', fake_get_metadata)
++        stubs.Set(app, 'get_metadata_by_remote_address', fake_get_metadata)
++
++        if fake_get_metadata_by_instance_id:
++            stubs.Set(app, 'get_metadata_by_instance_id',
++                      fake_get_metadata_by_instance_id)
+ 
+     request = webob.Request.blank(relpath)
+     request.remote_addr = address
+@@ -405,3 +410,62 @@ def fake_get_metadata(address):
+                                 fake_get_metadata=fake_get_metadata,
+                                 headers=None)
+         self.assertEqual(response.status_int, 500)
++
++    def test_user_data_with_quantum_instance_id(self):
++        expected_instance_id = 'a-b-c-d'
++
++        def fake_get_metadata(instance_id, remote_address):
++            if instance_id == expected_instance_id:
++                return self.mdinst
++            else:
++                # raise the exception to aid with 500 response code test
++                raise Exception("Expected instance_id of %s, got %s" %
++                                (expected_instance_id, instance_id))
++
++        signed = ('d98d0dd53b026a24df2c06b464ffa5da'
++                  'db922ae41af7bd3ecc3cae75aef65771')
++
++        # try a request with service disabled
++        response = fake_request(
++            self.stubs, self.mdinst,
++            relpath="/2009-04-04/user-data",
++            address="192.192.192.2",
++            headers={'X-Instance-ID': 'a-b-c-d',
++                     'X-Instance-ID-Signature': signed})
++        self.assertEqual(response.status_int, 200)
++
++        # now enable the service
++
++        self.flags(service_quantum_metadata_proxy=True)
++        response = fake_request(
++            self.stubs, self.mdinst,
++            relpath="/2009-04-04/user-data",
++            address="192.192.192.2",
++            fake_get_metadata_by_instance_id=fake_get_metadata,
++            headers={'X-Instance-ID': 'a-b-c-d',
++                     'X-Instance-ID-Signature': signed})
++
++        self.assertEqual(response.status_int, 200)
++        self.assertEqual(response.body,
++                         base64.b64decode(self.instance['user_data']))
++
++        response = fake_request(
++            self.stubs, self.mdinst,
++            relpath="/2009-04-04/user-data",
++            address="192.192.192.2",
++            fake_get_metadata_by_instance_id=fake_get_metadata,
++            headers={'X-Instance-ID': 'a-b-c-d',
++                     'X-Instance-ID-Signature': ''})
++
++        self.assertEqual(response.status_int, 403)
++
++        response = fake_request(
++            self.stubs, self.mdinst,
++            relpath="/2009-04-04/user-data",
++            address="192.192.192.2",
++            fake_get_metadata_by_instance_id=fake_get_metadata,
++            headers={'X-Instance-ID': 'z-z-z-z',
++                     'X-Instance-ID-Signature': '81f42e3fc77ba3a3e8d83142746e0'
++                                                '8387b96cbc5bd2474665192d2ec28'
++                                                '8ffb67'})
++        self.assertEqual(response.status_int, 500)
+-- 
+1.7.10
+
+
+From 42c72730c7613c87b3f22b6c711810bc6e88f415 Mon Sep 17 00:00:00 2001
+From: Choe, Cheng-Dae <choe.chengdae@kt.com>
+Date: Mon, 10 Dec 2012 20:47:49 +0900
+Subject: [PATCH 2/2] fix for folsom
+
+---
+ nova/api/metadata/handler.py |    1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/nova/api/metadata/handler.py b/nova/api/metadata/handler.py
+index 63af08d..58a6f18 100644
+--- a/nova/api/metadata/handler.py
++++ b/nova/api/metadata/handler.py
+@@ -27,6 +27,7 @@
+ from nova.api.metadata import base
+ from nova import exception
+ from nova import flags
++from nova.openstack.common import cfg
+ from nova.openstack.common import log as logging
+ from nova import wsgi
+ 
+-- 
+1.7.10
+
