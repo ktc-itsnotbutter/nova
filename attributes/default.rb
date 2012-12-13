@@ -269,7 +269,7 @@ when "ubuntu"
     "nova_api_metadata_process_name" => "nova-api-metadata",
     "nova_volume_packages" => ["nova-volume", "tgt"],
     "nova_volume_service" => "nova-volume",
-    "nova_compute_packages" => ["nova-compute"],
+    "nova_compute_packages" => ["python-mysqldb", "nova-compute"],
     "nova_compute_service" => "nova-compute",
     "nova_network_packages" => ["iptables", "nova-network"],
     "nova_network_service" => "nova-network",
