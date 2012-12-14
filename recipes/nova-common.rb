@@ -45,7 +45,7 @@ python_dist_path = `python -c "from distutils.sysconfig import get_python_lib; p
 Chef::Log.info("apply_metadata_proxy_patch: #{node['quantum']['apply_metadata_proxy_patch']}")
 cookbook_file '/tmp/metadata_proxy_nova_folsom.patch' do
   action :nothing
-  subscribes :create_if_missing, "package[#{platform_options['python_nova_common_package']}]", :immediately
+  subscribes :create_if_missing, resources(:package => "python-nova"), :immediately
   only_if { node['quantum']['apply_metadata_proxy_patch'] }
   source "metadata_proxy_nova_folsom.patch"
 end
