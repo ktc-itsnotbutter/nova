@@ -20,6 +20,7 @@ Chef::Log.info("apply_metadata_proxy_patch: #{node['quantum']['apply_metadata_pr
 
 include_recipe "nova::nova-rsyslog"
 include_recipe "osops-utils::autoetchosts"
+include_recipe "quantum::library"
 
 if not node['package_component'].nil?
   release = node['package_component']
