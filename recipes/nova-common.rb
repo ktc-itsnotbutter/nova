@@ -20,6 +20,7 @@ Chef::Log.info("apply_metadata_proxy_patch: #{node['quantum']['apply_metadata_pr
 
 include_recipe "nova::nova-rsyslog"
 include_recipe "osops-utils::autoetchosts"
+include_recipe "quantum::library"
 
 if not node['package_component'].nil?
   release = node['package_component']
@@ -134,6 +135,7 @@ template "/etc/nova/nova.conf" do
     "keystone_service_port" => ks_service_endpoint["port"],
     "glance_serverlist" => glance_serverlist,
     "use_quantum" => node["nova"]["quantum"]["use"],
+    "quantum_passwd" => node["quantum"]["service_pass"],
     "quantum_url" => quantum_url,
     "apply_metadata_proxy_patch" => node['quantum']['apply_metadata_proxy_patch'],
     "iscsi_helper" => platform_options["iscsi_helper"],
@@ -209,4 +211,11 @@ dsh_group "nova" do
   user "nova"
   admin_user "nova"
   group "nova"
+end
+
+%w{vm_create.sh tenant_create.sh}.each do |script|
+  cookbook_file "/root/#{script}" do
+    mode "0755"
+    source script
+  end
 end
