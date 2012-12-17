@@ -18,7 +18,6 @@
 #
 
 include_recipe "nova::nova-common"
-include_recipe "nova::api-metadata"
 include_recipe "monitoring"
 if node["nova"]["quantum"]["use"] != true
   include_recipe "nova::network"
