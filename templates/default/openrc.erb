@@ -3,7 +3,8 @@
 <% if not node["custom_template_banner"].nil? %>
 <%= node["custom_template_banner"] %>
 <% end %>
-
+tenant=$1
+if [ -z "$tenant" ]; then
 # COMMON OPENSTACK ENVS
 export OS_USERNAME=<%= @user %>
 export OS_PASSWORD=<%= @password %>
@@ -25,3 +26,12 @@ export NOVA_REGION_NAME=<%= @keystone_region %>
 export EC2_ACCESS_KEY=<%= @ec2_access_key %>
 export EC2_SECRET_KEY=<%= @ec2_secret_key %>
 export EC2_URL=<%= @ec2_url %>
+else
+# COMMON OPENSTACK ENVS
+export OS_USERNAME=${tenant}
+export OS_PASSWORD=${tenant}_passwd
+export OS_TENANT_NAME=${tenant}
+export OS_AUTH_URL=http://<%= @keystone_api_ipaddress %>:<%= @keystone_service_port %>/v2.0/
+export OS_AUTH_STRATEGY=<%= @auth_strategy %>
+export OS_NO_CACHE=1
+fi
