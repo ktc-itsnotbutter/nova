@@ -6,7 +6,7 @@ IMAGE=${IMAGE:-cirros-image}
 #IMAGE=${IMAGE:-precise-image}
 
 # external subnet
-EXTSUBNET=${EXTSUBNET:-10.100.1.128/25}
+EXTSUBNET=${EXTSUBNET:-10.100.0.0/16}
 
 # tenant private subnet
 PRISUBNET=${PRISUBNET:-172.16.0.0/16}
